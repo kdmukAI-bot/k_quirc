@@ -19,6 +19,7 @@ Usage:
 """
 
 import argparse
+import collections
 import csv
 import hashlib
 import json
@@ -551,6 +552,21 @@ def validate_results(cases, parsed, known_failures=None):
             'status': status,
         })
 
+    # Only report a configuration as "newly passing" if ALL iterations for
+    # that known-failure pattern passed.  Otherwise demote partial passes back
+    # to expected_failure — a pattern isn't actionable until every random
+    # payload variant succeeds.
+    by_base = collections.defaultdict(list)
+    for r in results:
+        if r['known_failure']:
+            by_base[filename_base(r['filename'])].append(r)
+    for group in by_base.values():
+        all_passing = all(r['status'] == 'newly_passing' for r in group)
+        if not all_passing:
+            for r in group:
+                if r['status'] == 'newly_passing':
+                    r['status'] = 'expected_failure'
+
     return results
 
 
@@ -725,10 +741,9 @@ def main():
     if args.k_quirc_dir:
         k_quirc_dir = os.path.abspath(args.k_quirc_dir)
     else:
-        k_quirc_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if not os.path.isdir(k_quirc_dir):
-            k_quirc_dir = os.path.abspath(os.path.join(
-                os.path.dirname(__file__), '..'))
+        # Script is at test/validation/run_validation.py — go up 3 levels
+        k_quirc_dir = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
 
     test_dir = os.path.join(k_quirc_dir, 'test')
     script_dir = os.path.dirname(os.path.abspath(__file__))

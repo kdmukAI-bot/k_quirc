@@ -44,12 +44,6 @@ jobs:
           sudo apt-get install -y qrencode
           pip install -r test/validation/requirements.txt
 
-      - name: Build test harness
-        run: |
-          cd test
-          cmake -B build_ci
-          cmake --build build_ci
-
       - name: Run validation
         run: >
           python3 test/validation/run_validation.py
@@ -64,15 +58,17 @@ jobs:
 
       - name: Show results summary
         if: always()
-        run: >
+        run: |
           python3 -c "
-          import json, sys;
-          d = json.load(open('validation-results.json'));
-          s = d['summary'];
-          parts = [f\"{s['passed']}/{s['total']} passed ({s['pass_rate']}%)\"];
-          parts.append(f\"{s['expected_failures']} expected failures\");
-          if s.get('regressions', 0): parts.append(f\"REGRESSIONS: {s['regressions']}\");
-          if s.get('newly_passing', 0): parts.append(f\"newly passing: {s['newly_passing']} ***\");
+          import json, sys
+          d = json.load(open('validation-results.json'))
+          s = d['summary']
+          parts = [f\"{s['passed']}/{s['total']} passed ({s['pass_rate']}%)\"]
+          parts.append(f\"{s['expected_failures']} expected failures\")
+          if s.get('regressions', 0):
+              parts.append(f\"REGRESSIONS: {s['regressions']}\")
+          if s.get('newly_passing', 0):
+              parts.append(f\"newly passing: {s['newly_passing']} ***\")
           print(', '.join(parts))
           "
 
