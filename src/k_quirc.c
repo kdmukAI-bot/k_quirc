@@ -141,6 +141,75 @@ void k_quirc_end(k_quirc_t *q, bool find_inverted) {
   k_quirc_identify(q, find_inverted);
 }
 
+int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
+                            k_quirc_effort_t effort) {
+  if (!q || !q->image || !q->pixels || !q->flood_fill_stack || !result)
+    return 0;
+
+  /* Absolute offset ladder tried after the seed. The order sets the acquisition
+   * search only; it is sensor-agnostic, and the lock self-corrects the seed
+   * after the first success (so a mis-ordered ladder just costs a few probes at
+   * cold start). Negative-first because emissive/bright captures want it, but a
+   * static/paper scan still reaches the positive regime under THOROUGH. */
+  static const int ladder[] = {-15, -10, -20, -5, 0, 5, 10, 15, 20};
+  const int nlad = (int)(sizeof(ladder) / sizeof(ladder[0]));
+  const int cap = (effort == K_QUIRC_EFFORT_FAST) ? 4 : (nlad + 1);
+
+  const int seed = k_quirc_get_threshold_offset_for(q);
+  const size_t n = (size_t)q->w * q->h;
+
+  /* threshold() binarizes q->pixels in place, and pixels alias image, so each
+   * re-identify would otherwise threshold the previous pass's 0/1 output. Keep
+   * a pristine grayscale copy and restore it before every re-identify. If the
+   * snapshot can't be allocated, degrade to a single attempt at the seed.
+   * TODO(perf): this allocs/frees w*h per call; cache a reusable snapshot buffer
+   * on the decoder (freed in k_quirc_destroy) before shipping to avoid per-frame
+   * heap churn during scanning. */
+  uint8_t *pristine = K_MALLOC_IMAGE(n);
+
+  int passes = 0;
+  int decoded = 0;
+  /* stage 0 = the seed (locked) offset; stages 1..nlad = the ladder. */
+  for (int stage = 0; stage <= nlad && passes < cap && !decoded; stage++) {
+    const int off = (stage == 0) ? seed : ladder[stage - 1];
+    if (stage > 0 && off == seed)
+      continue; /* already tried the seed at stage 0 */
+
+    if (passes == 0) {
+      if (pristine)
+        memcpy(pristine, q->image, n); /* snapshot before the first identify */
+    } else if (pristine) {
+      memcpy(q->image, pristine, n); /* restore grayscale before re-identify */
+    } else {
+      break; /* no snapshot -> the first (seed) attempt is all we can do */
+    }
+
+    k_quirc_set_threshold_offset_for(q, off);
+    /* per-frame identify state that k_quirc_begin() normally clears */
+    q->num_regions = QUIRC_PIXEL_REGION;
+    q->num_capstones = 0;
+    q->num_grids = 0;
+    q->flood_fill_overflow = false;
+    k_quirc_identify(q, false);
+    passes++;
+
+    const int ngrids = k_quirc_count(q);
+    for (int g = 0; g < ngrids; g++) {
+      if (k_quirc_decode(q, g, result) == K_QUIRC_SUCCESS && result->valid) {
+        k_quirc_set_threshold_offset_for(q, off); /* LOCK the winning offset */
+        decoded = 1;
+        break;
+      }
+    }
+  }
+
+  if (pristine)
+    K_FREE(pristine);
+  if (!decoded)
+    k_quirc_set_threshold_offset_for(q, seed); /* don't disturb the lock on a miss */
+  return decoded;
+}
+
 int k_quirc_count(const k_quirc_t *q) { return q ? q->num_grids : 0; }
 
 k_quirc_error_t k_quirc_decode(k_quirc_t *q, int index,
