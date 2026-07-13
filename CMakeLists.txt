@@ -19,6 +19,13 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC K_QUIRC_BILINEAR_THRESHOLD)
 # Uncomment to enable the inverted-colors retry pass when no QR is found.
 # target_compile_definitions(${COMPONENT_LIB} PUBLIC K_QUIRC_INVERTED_RETRY)
 
+# Contrast stretch - Kconfig-driven when building under ESP-IDF
+if(CONFIG_K_QUIRC_CONTRAST_STRETCH)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC K_QUIRC_CONTRAST_STRETCH)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC
+        K_QUIRC_CONTRAST_CLIP_PCT=${CONFIG_K_QUIRC_CONTRAST_CLIP_PCT})
+endif()
+
 # Route decoder context + flood-fill scratch to PSRAM - Kconfig-driven under ESP-IDF
 if(CONFIG_K_QUIRC_SCRATCH_IN_PSRAM)
     target_compile_definitions(${COMPONENT_LIB} PUBLIC K_QUIRC_SCRATCH_IN_PSRAM)
