@@ -154,6 +154,34 @@ int k_quirc_decode_grayscale(const uint8_t *grayscale_data, int width,
                              int height, k_quirc_result_t *results,
                              int max_results, bool find_inverted);
 
+/* Effort level for the adaptive-threshold decode sweep. */
+typedef enum {
+  K_QUIRC_EFFORT_FAST = 0, /* bounded sweep — animated scans (bound the tax on
+                              undecodable frames so throughput doesn't stall) */
+  K_QUIRC_EFFORT_THOROUGH, /* full sweep — static scans (paper/metal/SeedQR),
+                              where a dropped frame costs nothing */
+} k_quirc_effort_t;
+
+/**
+ * Adaptive-threshold decode with bootstrap sweep + lock.
+ *
+ * Fill the grayscale buffer via k_quirc_begin() first, then call this instead of
+ * end()+count()+decode(). Sweeps the binarization threshold offset to find one
+ * that decodes, seeded from the current (locked) offset, and LEAVES the winning
+ * offset in place so the next (similar) frame decodes immediately at ~one pass.
+ * Composes with the per-grid decode, including any corner-nudge rescue.
+ *
+ * The threshold binarizes the image in place, so this snapshots the grayscale
+ * once and restores it before each re-identify.
+ *
+ * @param q       Decoder instance (already resized + filled via k_quirc_begin)
+ * @param result  Receives the first decoded code
+ * @param effort  FAST (bounded) or THOROUGH (full sweep)
+ * @return 1 if a code decoded (into *result), 0 otherwise
+ */
+int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
+                            k_quirc_effort_t effort);
+
 /* Debug visualization support */
 #ifdef K_QUIRC_DEBUG
 
