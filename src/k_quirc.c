@@ -174,6 +174,7 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
   int decoded = 0;
   int win_off = seed;
   bool used_local = false;
+  int max_caps = 0; /* most finder patterns seen across probes so far */
   /* stage 0 = the seed (locked) offset; stages 1..nlad = the ladder. */
   for (int stage = 0; stage <= nlad && passes < cap && !decoded; stage++) {
     const int off = (stage == 0) ? seed : ladder[stage - 1];
@@ -207,6 +208,18 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
         break;
       }
     }
+
+    /* No-QR early-out. Finder patterns are the most threshold-robust part of a
+     * QR (large, high-contrast), so once the two most likely offsets -- the seed
+     * and the first ladder entry -- have both been tried and NOT one capstone has
+     * appeared, there is no QR in frame. Stop rather than burn the rest of the
+     * ladder on an empty/searching frame (this keeps idle cheap: ~2 passes, not
+     * the full cap). A real QR surfaces >=3 capstones by the -15 probe, so its
+     * rescue is unaffected. */
+    if (q->num_capstones > max_caps)
+      max_caps = q->num_capstones;
+    if (!decoded && passes >= 2 && max_caps == 0)
+      break;
   }
 
 #ifdef K_QUIRC_LOCAL_THRESHOLD
@@ -215,7 +228,7 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
    * spatial illumination / soft focus no single global offset can bin (and is
    * the primary lever for metal plates). One extra pass, and only under
    * THOROUGH, so animated (FAST) scans stay bounded. */
-  if (!decoded && effort == K_QUIRC_EFFORT_THOROUGH && pristine) {
+  if (!decoded && effort == K_QUIRC_EFFORT_THOROUGH && pristine && max_caps > 0) {
     used_local = true;
     memcpy(q->image, pristine, n); /* restore grayscale (global sweep binarized it) */
     q->local_win = q->w / 12;      /* ~per-7-module window for a frame-filling QR */
