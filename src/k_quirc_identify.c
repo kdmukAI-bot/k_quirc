@@ -1389,6 +1389,70 @@ static void pixels_setup(struct k_quirc *q) {
 /*
  * Public identification function
  */
+#ifdef K_QUIRC_LOCAL_THRESHOLD
+/* Percentage the local mean is lowered by before comparison (Bradley's `t`).
+ * pixel < mean*(1 - PCT/100) => BLACK. Higher => more black. */
+#ifndef K_QUIRC_LOCAL_THRESHOLD_PCT
+#define K_QUIRC_LOCAL_THRESHOLD_PCT 12
+#endif
+
+/* Bradley-Roth adaptive threshold: binarize each pixel against the mean of a
+ * win*win neighbourhood via one integral image. Recovers frames whose spatial
+ * illumination / soft focus the global bilinear-Otsu threshold can't resolve
+ * (and is the primary lever for metal plates). Used only for the failure-gated
+ * second pass in k_quirc_decode_adaptive, so its cost + memory are paid once,
+ * on a frame that already failed the whole global sweep.
+ *
+ * The window is sized ~image/12 (a per-~7-module proxy for a frame-filling QR).
+ * TODO(portability): when a grid formed during the global sweep, size the window
+ * from the detected module pitch instead (TRAP #1); TODO(mem): the transient
+ * integral is ~4*(w+1)*(h+1) bytes — swap for a sliding row-band before shipping. */
+HOT_FUNC
+static void local_threshold(struct k_quirc *q, int win) {
+  const int w = q->w, h = q->h;
+  quirc_pixel_t *px = q->pixels;
+  int half = win / 2;
+  if (half < 1)
+    half = 1;
+
+  /* int32 integral: max prefix sum 255*w*h <= 255*1280*1280 < INT32_MAX. */
+  int32_t *I = K_MALLOC_SCRATCH((size_t)(w + 1) * (h + 1) * sizeof(int32_t));
+  if (!I)
+    return; /* leave the grayscale as-is; identify simply finds nothing (safe) */
+
+  for (int y = 0; y < h; y++) {
+    int32_t rs = 0;
+    const quirc_pixel_t *row = px + (size_t)y * w;
+    int32_t *Iy1 = I + (size_t)(y + 1) * (w + 1);
+    int32_t *Iy = I + (size_t)y * (w + 1);
+    for (int x = 0; x < w; x++) {
+      rs += row[x];
+      Iy1[x + 1] = Iy[x + 1] + rs;
+    }
+  }
+
+  const int t = K_QUIRC_LOCAL_THRESHOLD_PCT;
+  for (int y = 0; y < h; y++) {
+    int y0 = y - half < 0 ? 0 : y - half;
+    int y1 = y + half >= h ? h - 1 : y + half;
+    quirc_pixel_t *row = px + (size_t)y * w;
+    const int32_t *Iy1 = I + (size_t)(y1 + 1) * (w + 1);
+    const int32_t *Iy0 = I + (size_t)y0 * (w + 1);
+    for (int x = 0; x < w; x++) {
+      int x0 = x - half < 0 ? 0 : x - half;
+      int x1 = x + half >= w ? w - 1 : x + half;
+      int area = (x1 - x0 + 1) * (y1 - y0 + 1);
+      int32_t sum = Iy1[x1 + 1] - Iy0[x1 + 1] - Iy1[x0] + Iy0[x0];
+      /* row[x] < (sum/area)*(1 - t/100)  ==  row[x]*area*100 < sum*(100 - t) */
+      int black =
+          ((int64_t)row[x] * area * 100 < (int64_t)sum * (100 - t));
+      row[x] = black ? QUIRC_PIXEL_BLACK : QUIRC_PIXEL_WHITE;
+    }
+  }
+  K_FREE(I);
+}
+#endif /* K_QUIRC_LOCAL_THRESHOLD */
+
 void k_quirc_identify(struct k_quirc *q, bool find_inverted) {
   if (!q)
     return;
@@ -1397,7 +1461,12 @@ void k_quirc_identify(struct k_quirc *q, bool find_inverted) {
   q->processing_inverted = false;
 #endif
   pixels_setup(q);
-  threshold(q, false);
+#ifdef K_QUIRC_LOCAL_THRESHOLD
+  if (q->local_win > 0)
+    local_threshold(q, q->local_win);
+  else
+#endif
+    threshold(q, false);
 
   for (int i = 0; i < q->h; i++)
     finder_scan(q, i);

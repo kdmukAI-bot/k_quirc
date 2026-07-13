@@ -203,6 +203,33 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
     }
   }
 
+#ifdef K_QUIRC_LOCAL_THRESHOLD
+  /* Failure-gated second pass: when the whole global offset sweep found no
+   * decode, try a finer local (Bradley) threshold, which recovers frames whose
+   * spatial illumination / soft focus no single global offset can bin (and is
+   * the primary lever for metal plates). One extra pass, and only under
+   * THOROUGH, so animated (FAST) scans stay bounded. */
+  if (!decoded && effort == K_QUIRC_EFFORT_THOROUGH && pristine) {
+    memcpy(q->image, pristine, n); /* restore grayscale (global sweep binarized it) */
+    q->local_win = q->w / 12;      /* ~per-7-module window for a frame-filling QR */
+    if (q->local_win < 3)
+      q->local_win = 3;
+    q->num_regions = QUIRC_PIXEL_REGION;
+    q->num_capstones = 0;
+    q->num_grids = 0;
+    q->flood_fill_overflow = false;
+    k_quirc_identify(q, false);
+    q->local_win = 0;
+    const int ng = k_quirc_count(q);
+    for (int g = 0; g < ng; g++) {
+      if (k_quirc_decode(q, g, result) == K_QUIRC_SUCCESS && result->valid) {
+        decoded = 1;
+        break;
+      }
+    }
+  }
+#endif
+
   if (pristine)
     K_FREE(pristine);
   if (!decoded)
