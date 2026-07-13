@@ -211,6 +211,11 @@ struct k_quirc {
   int threshold_offset;
   bool processing_inverted;
 #endif
+#ifdef K_QUIRC_LOCAL_THRESHOLD
+  int local_win; /* >0: binarize with the local (Bradley) threshold using this
+                    window instead of the global one. Set only for the
+                    failure-gated second pass in k_quirc_decode_adaptive. */
+#endif
   int w;
   int h;
   int num_regions;
