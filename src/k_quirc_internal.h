@@ -55,9 +55,16 @@ static inline void *k_malloc_fast(size_t size) {
 
 #define K_MALLOC(size) k_malloc_large(size)
 #define K_MALLOC_FAST(size) k_malloc_fast(size)
-#define K_MALLOC_CONTEXT(size) k_malloc_fast(size)
 #define K_MALLOC_IMAGE(size) k_malloc_large(size)
+/* Context (~17 KB) and flood-fill scratch (64 KB) default to internal-preferred RAM.
+ * Define K_QUIRC_SCRATCH_IN_PSRAM to route them to PSRAM instead. */
+#if defined(K_QUIRC_SCRATCH_IN_PSRAM)
+#define K_MALLOC_CONTEXT(size) k_malloc_large(size)
+#define K_MALLOC_SCRATCH(size) k_malloc_large(size)
+#else
+#define K_MALLOC_CONTEXT(size) k_malloc_fast(size)
 #define K_MALLOC_SCRATCH(size) k_malloc_fast(size)
+#endif
 #define K_FREE(ptr) heap_caps_free(ptr)
 #else
 #define K_MALLOC(size) malloc(size)

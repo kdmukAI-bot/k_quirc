@@ -1,0 +1,18 @@
+menu "K-Quirc QR Decoder"
+
+    config K_QUIRC_SCRATCH_IN_PSRAM
+        bool "Allocate decoder context + flood-fill scratch in PSRAM"
+        default n
+        help
+            Routes the decoder context (~17 KB) and flood-fill scratch (64 KB)
+            to PSRAM instead of internal-preferred RAM. Enable when a co-resident
+            task needs the internal RAM the decoder would otherwise fragment.
+
+    config K_QUIRC_DEBUG
+        bool "Enable QR decoder debug visualization"
+        default n
+        help
+            Shows the thresholded pixel buffer with timing pattern overlays.
+            Useful for development and debugging QR detection issues.
+
+endmenu
