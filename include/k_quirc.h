@@ -162,6 +162,17 @@ typedef enum {
                               where a dropped frame costs nothing */
 } k_quirc_effort_t;
 
+/* Per-call cost/behaviour readout for k_quirc_decode_adaptive (all optional). */
+typedef struct {
+  int passes;       /* identify passes performed (global sweep + local); the
+                       per-frame cost driver — 1 once locked, up to the ladder
+                       cap on acquisition, +1 when the local pass runs */
+  int locked_offset; /* threshold offset in effect at return (the lock / seed) */
+  int win_offset;   /* offset that decoded this frame (locked_offset on a hit) */
+  bool used_local;  /* the failure-gated local-threshold pass ran */
+  bool decoded;     /* a code decoded (mirrors the return value) */
+} k_quirc_adaptive_stats_t;
+
 /**
  * Adaptive-threshold decode with bootstrap sweep + lock.
  *
@@ -177,10 +188,12 @@ typedef enum {
  * @param q       Decoder instance (already resized + filled via k_quirc_begin)
  * @param result  Receives the first decoded code
  * @param effort  FAST (bounded) or THOROUGH (full sweep)
+ * @param stats   Optional (nullable) per-call cost/behaviour readout
  * @return 1 if a code decoded (into *result), 0 otherwise
  */
 int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
-                            k_quirc_effort_t effort);
+                            k_quirc_effort_t effort,
+                            k_quirc_adaptive_stats_t *stats);
 
 /* Debug visualization support */
 #ifdef K_QUIRC_DEBUG

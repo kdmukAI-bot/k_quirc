@@ -142,7 +142,10 @@ void k_quirc_end(k_quirc_t *q, bool find_inverted) {
 }
 
 int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
-                            k_quirc_effort_t effort) {
+                            k_quirc_effort_t effort,
+                            k_quirc_adaptive_stats_t *stats) {
+  if (stats)
+    memset(stats, 0, sizeof(*stats));
   if (!q || !q->image || !q->pixels || !q->flood_fill_stack || !result)
     return 0;
 
@@ -169,6 +172,8 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
 
   int passes = 0;
   int decoded = 0;
+  int win_off = seed;
+  bool used_local = false;
   /* stage 0 = the seed (locked) offset; stages 1..nlad = the ladder. */
   for (int stage = 0; stage <= nlad && passes < cap && !decoded; stage++) {
     const int off = (stage == 0) ? seed : ladder[stage - 1];
@@ -197,6 +202,7 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
     for (int g = 0; g < ngrids; g++) {
       if (k_quirc_decode(q, g, result) == K_QUIRC_SUCCESS && result->valid) {
         k_quirc_set_threshold_offset_for(q, off); /* LOCK the winning offset */
+        win_off = off;
         decoded = 1;
         break;
       }
@@ -210,6 +216,7 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
    * the primary lever for metal plates). One extra pass, and only under
    * THOROUGH, so animated (FAST) scans stay bounded. */
   if (!decoded && effort == K_QUIRC_EFFORT_THOROUGH && pristine) {
+    used_local = true;
     memcpy(q->image, pristine, n); /* restore grayscale (global sweep binarized it) */
     q->local_win = q->w / 12;      /* ~per-7-module window for a frame-filling QR */
     if (q->local_win < 3)
@@ -219,6 +226,7 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
     q->num_grids = 0;
     q->flood_fill_overflow = false;
     k_quirc_identify(q, false);
+    passes++;
     q->local_win = 0;
     const int ng = k_quirc_count(q);
     for (int g = 0; g < ng; g++) {
@@ -234,6 +242,13 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
     K_FREE(pristine);
   if (!decoded)
     k_quirc_set_threshold_offset_for(q, seed); /* don't disturb the lock on a miss */
+  if (stats) {
+    stats->passes = passes;
+    stats->locked_offset = k_quirc_get_threshold_offset_for(q);
+    stats->win_offset = win_off;
+    stats->used_local = used_local;
+    stats->decoded = (bool)decoded;
+  }
   return decoded;
 }
 
