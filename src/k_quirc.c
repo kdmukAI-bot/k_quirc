@@ -141,6 +141,62 @@ void k_quirc_end(k_quirc_t *q, bool find_inverted) {
   k_quirc_identify(q, find_inverted);
 }
 
+#ifdef K_QUIRC_LOCAL_THRESHOLD
+/* Blended/blur cutoff, in per-mille of central pixels within +-30 of the Otsu
+ * split. Clean QRs are strongly bimodal and sit well under this; torn/blended
+ * (or badly blurred) frames pile up mid-gray and exceed it. Measured separation:
+ * recoverable <= ~68, blended >= ~87. */
+#ifndef K_QUIRC_LOCAL_MID_GRAY_MAX_PERMILLE
+#define K_QUIRC_LOCAL_MID_GRAY_MAX_PERMILLE 80
+#endif
+
+/* Cheap blended/blur detector: per-mille of central-region pixels whose value
+ * falls within +-30 of the Otsu black/white split. One histogram pass over the
+ * grayscale -- far cheaper than the local-threshold identify it gates -- so the
+ * hopeless (torn/blurred) frames don't get charged that pass. */
+static int k_quirc_mid_gray_permille(const uint8_t *img, int w, int h) {
+  long hist[256] = {0};
+  long tot = 0;
+  int mx = w / 5, my = h / 5; /* central 60%, matching the threshold sampling */
+  for (int y = my; y < h - my; y++) {
+    const uint8_t *row = img + (size_t)y * w;
+    for (int x = mx; x < w - mx; x++) {
+      hist[row[x]]++;
+      tot++;
+    }
+  }
+  if (tot <= 0)
+    return 0;
+  double sum = 0;
+  for (int i = 0; i < 256; i++)
+    sum += (double)i * hist[i];
+  double sumB = 0, vmax = 0;
+  long wB = 0;
+  int T = 0;
+  for (int i = 0; i < 256; i++) {
+    wB += hist[i];
+    if (!wB)
+      continue;
+    long wF = tot - wB;
+    if (!wF)
+      break;
+    sumB += (double)i * hist[i];
+    double mB = sumB / wB, mF = (sum - sumB) / wF, d = mB - mF;
+    double vb = (double)wB * (double)wF * d * d;
+    if (vb >= vmax) {
+      vmax = vb;
+      T = i;
+    }
+  }
+  int lo = T - 30 < 0 ? 0 : T - 30;
+  int hi = T + 30 > 255 ? 255 : T + 30;
+  long mid = 0;
+  for (int v = lo; v <= hi; v++)
+    mid += hist[v];
+  return (int)(1000 * mid / tot);
+}
+#endif /* K_QUIRC_LOCAL_THRESHOLD */
+
 int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
                             k_quirc_effort_t effort,
                             k_quirc_adaptive_stats_t *stats) {
@@ -223,12 +279,18 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
   }
 
 #ifdef K_QUIRC_LOCAL_THRESHOLD
-  /* Failure-gated second pass: when the whole global offset sweep found no
-   * decode, try a finer local (Bradley) threshold, which recovers frames whose
-   * spatial illumination / soft focus no single global offset can bin (and is
-   * the primary lever for metal plates). One extra pass, and only under
-   * THOROUGH, so animated (FAST) scans stay bounded. */
-  if (!decoded && effort == K_QUIRC_EFFORT_THOROUGH && pristine && max_caps > 0) {
+  /* Failure-gated second pass: when the global offset sweep found no decode but a
+   * QR *was* located (>=1 capstone), retry with a finer local (Bradley) threshold
+   * -- it recovers frames whose spatial illumination / soft focus no single
+   * global offset can bin, and is the primary lever for metal plates. Runs under
+   * both efforts (a located-but-undecoded frame is worth the one extra pass);
+   * effort still controls the *global* sweep depth (FAST caps it). Two cheap
+   * gates keep it from ever paying for a hopeless frame: max_caps>0 (skip empty
+   * frames) and the mid-gray test (skip torn/blended or badly-blurred frames,
+   * which no threshold recovers -- see k_quirc_mid_gray_permille). */
+  if (!decoded && pristine && max_caps > 0 &&
+      k_quirc_mid_gray_permille(pristine, q->w, q->h) <
+          K_QUIRC_LOCAL_MID_GRAY_MAX_PERMILLE) {
     used_local = true;
     memcpy(q->image, pristine, n); /* restore grayscale (global sweep binarized it) */
     q->local_win = q->w / 12;      /* ~per-7-module window for a frame-filling QR */
