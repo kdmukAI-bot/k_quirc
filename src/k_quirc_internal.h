@@ -136,7 +136,12 @@ typedef struct {
 } xylf_t;
 #define K_QUIRC_MAX_IMAGE_DIM 1280
 #define K_QUIRC_THRESHOLD_OFFSET_DEFAULT 10
+/* Overridable so a build enabling the additive-deep ladder
+ * (K_QUIRC_LADDER_SELECT) can raise the clamp to make its +/-40 rungs
+ * reachable (the CMakeLists flag block defines it to 40 there). */
+#ifndef K_QUIRC_THRESHOLD_OFFSET_MAX
 #define K_QUIRC_THRESHOLD_OFFSET_MAX 20
+#endif
 
 #if QUIRC_MAX_REGIONS < UINT8_MAX
 typedef uint8_t quirc_pixel_t;
@@ -215,6 +220,24 @@ struct k_quirc {
   int local_win; /* >0: binarize with the local (Bradley) threshold using this
                     window instead of the global one. Set only for the
                     failure-gated second pass in k_quirc_decode_adaptive. */
+#endif
+#ifdef K_QUIRC_BLEND_GATE
+  int blend_gate_permille; /* runtime sweep-bail threshold for the quad-ROI
+                              blend check, 0 = disabled; see
+                              k_quirc_set_blend_gate_permille() */
+#endif
+#ifdef K_QUIRC_SWEEP_CAP
+  int sweep_cap; /* >0: numeric probe budget overriding the effort cap; see
+                    k_quirc_set_sweep_cap() */
+#endif
+#ifdef K_QUIRC_LADDER_SELECT
+  int ladder_select; /* 0 = stock ladder, 1 = additive-deep (+/-40); see
+                        k_quirc_set_ladder_select() */
+#endif
+#ifdef K_QUIRC_INSTR
+  bool instr_seed_en;    /* seed-override instrumentation active */
+  int instr_seed;        /* pinned sweep seed offset (clamped at set) */
+  bool instr_lock_freeze;/* suppress lock updates (restore seed at return) */
 #endif
   int w;
   int h;

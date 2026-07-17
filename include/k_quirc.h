@@ -171,6 +171,19 @@ typedef struct {
   int win_offset;   /* offset that decoded this frame (locked_offset on a hit) */
   bool used_local;  /* the failure-gated local-threshold pass ran */
   bool decoded;     /* a code decoded (mirrors the return value) */
+  int blend_score; /* quad-ROI mid-gray blend score (per-mille) measured on a
+                      failed seed pass with detection anchors; -1 when not
+                      computed (decoded at seed, no anchors, invalid box, or
+                      K_QUIRC_BLEND_GATE compiled out) */
+  bool bailed_blend; /* the runtime blend gate ended the sweep after the seed
+                        pass (see k_quirc_set_blend_gate_permille) */
+  int seed_offset;   /* threshold offset the sweep was seeded with (the lock at
+                        call entry, or the instrumentation override) */
+  int max_capstones; /* most finder patterns seen across this call's passes --
+                        distinguishes the partial-structure class (1-2 capstones
+                        burning the full cap) from clean misses */
+  bool bailed_noqr;  /* the no-QR early-out ended the sweep (no capstone after
+                        the two most likely offsets) */
 } k_quirc_adaptive_stats_t;
 
 /**
@@ -194,6 +207,83 @@ typedef struct {
 int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
                             k_quirc_effort_t effort,
                             k_quirc_adaptive_stats_t *stats);
+
+/**
+ * Runtime blend-gate threshold for k_quirc_decode_adaptive (per-instance).
+ *
+ * When enabled (permille > 0) and the seed pass fails with detection anchors,
+ * the mid-gray blend score measured inside the detected QR's bounding box is
+ * compared against the gate; a score >= the gate ends the sweep immediately
+ * (~1 pass instead of the full ladder) -- a blended (animation-torn) frame
+ * can never decode at any offset. The score is always reported via
+ * k_quirc_adaptive_stats_t when measurable, so shadow-mode telemetry works
+ * with the gate disabled.
+ *
+ * Default 0 = disabled (zero behavior change for existing callers). Clamped
+ * to 0..1000. Callable in every build configuration; a no-op when
+ * K_QUIRC_BLEND_GATE is compiled out.
+ */
+void k_quirc_set_blend_gate_permille(k_quirc_t *q, int permille);
+
+/**
+ * Numeric probe budget for k_quirc_decode_adaptive (per-instance).
+ *
+ * When set (> 0), overrides the effort level's built-in pass cap (FAST 4 /
+ * THOROUGH full ladder) with an explicit per-call probe budget -- the
+ * "cap-as-parameter" tuning knob (per-board caps are set from shadow data,
+ * not hardcoded). 0 restores the effort defaults.
+ *
+ * Default 0 = effort defaults (zero behavior change for existing callers).
+ * Callable in every build configuration; a no-op when K_QUIRC_SWEEP_CAP is
+ * compiled out.
+ */
+void k_quirc_set_sweep_cap(k_quirc_t *q, int cap);
+
+/**
+ * Sweep ladder selection for k_quirc_decode_adaptive (per-instance).
+ *
+ * 0 (default) = the stock ladder (steps of 5 across -20..+20).
+ * 1 = the additive-deep ladder: the stock ladder followed by deep rungs out
+ *     to +/-40 (negative-deep first -- the measured decode-window mode sits
+ *     deep-negative on emissive sources). Intended for THOROUGH static-media
+ *     scans, where a doomed frame costs nothing; requires the threshold
+ *     clamp raised to +/-40 (K_QUIRC_THRESHOLD_OFFSET_MAX) to be reachable.
+ *
+ * Callable in every build configuration; a no-op when K_QUIRC_LADDER_SELECT
+ * is compiled out.
+ */
+void k_quirc_set_ladder_select(k_quirc_t *q, int select);
+
+/**
+ * INSTRUMENTATION ONLY (K_QUIRC_INSTR): pin the sweep seed and optionally
+ * freeze the lock, so a fixed-regime-seed arm can be A/B'd against the
+ * dynamic lock on identical scenes.
+ *
+ * enable != 0: every k_quirc_decode_adaptive call seeds its sweep at
+ * `seed_offset` (clamped) instead of the current lock. freeze_lock != 0
+ * additionally restores the threshold offset to `seed_offset` before
+ * returning, so a win never moves the lock (stats->win_offset still reports
+ * the rung that decoded). enable == 0 restores normal lock behavior.
+ *
+ * Callable in every build configuration; a no-op when K_QUIRC_INSTR is
+ * compiled out.
+ */
+void k_quirc_instr_seed_override(k_quirc_t *q, int enable, int seed_offset,
+                                 int freeze_lock);
+
+/**
+ * INSTRUMENTATION ONLY (K_QUIRC_INSTR): drop the learned adaptive-threshold
+ * lock back to a cold-start state, so the next k_quirc_decode_adaptive runs a
+ * full acquisition sweep as if the decoder had just been created. Re-seeds the
+ * lock to the build default (k_quirc_get_threshold_offset()); it is the exact
+ * state k_quirc_new() starts in. Used by the BBQR bench to make each of its 3
+ * completion trials an independent cold-start sample instead of sharing one
+ * warm lock. Lock only -- does not touch the camera/AE.
+ *
+ * Callable in every build configuration; a no-op when K_QUIRC_INSTR is
+ * compiled out (or when K_QUIRC_ADAPTIVE_THRESHOLD is, since there is no lock).
+ */
+void k_quirc_reset_lock(k_quirc_t *q);
 
 /* Debug visualization support */
 #ifdef K_QUIRC_DEBUG
