@@ -112,16 +112,18 @@ jobs:
           --json > validation-results-adaptive.json
 
       # No-flag leg: build with the optional algorithms compiled out
-      # (K_QUIRC_ADAPTIVE_THRESHOLD + K_QUIRC_BILINEAR_THRESHOLD off) and run the
-      # fixed-path validation. Guards the opt-in contract -- the public API must
-      # stay callable and the fixed path must keep decoding when a consumer
-      # comments the flags out (the Defect-1 regression class).
+      # (K_QUIRC_ADAPTIVE_THRESHOLD + K_QUIRC_BILINEAR_THRESHOLD +
+      # K_QUIRC_BLEND_GATE off) and run the fixed-path validation. Guards the
+      # opt-in contract -- the public API must stay callable and the fixed path
+      # must keep decoding when a consumer comments the flags out (the Defect-1
+      # regression class).
       - name: Build no-flag configuration
         run: |
           cd test
           cmake -B build_noflag \
             -DK_QUIRC_ADAPTIVE_THRESHOLD=OFF \
-            -DK_QUIRC_BILINEAR_THRESHOLD=OFF
+            -DK_QUIRC_BILINEAR_THRESHOLD=OFF \
+            -DK_QUIRC_BLEND_GATE=OFF
           cmake --build build_noflag
 
       - name: Run validation (no-flag build, fixed path)

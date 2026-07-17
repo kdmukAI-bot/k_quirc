@@ -23,6 +23,16 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC K_QUIRC_ADAPTIVE_THRESHOLD)
 # Comment out to disable (uses single global threshold instead)
 target_compile_definitions(${COMPONENT_LIB} PUBLIC K_QUIRC_BILINEAR_THRESHOLD)
 
+# Blend gate - on a failed seed pass with detection anchors, score the mid-gray
+# blend contamination inside the detected QR box (always reported via the
+# adaptive stats) and bail out of the adaptive sweep on blended (animation-torn)
+# frames, which decode at no offset. Threshold starts at
+# K_QUIRC_BLEND_GATE_DEFAULT (160 per-mille; define it here to re-tune) and is
+# runtime-settable via k_quirc_set_blend_gate() (0 disables). Only affects
+# k_quirc_decode_adaptive and requires K_QUIRC_ADAPTIVE_THRESHOLD. Comment out
+# to disable (the setter stays callable as a no-op).
+target_compile_definitions(${COMPONENT_LIB} PUBLIC K_QUIRC_BLEND_GATE)
+
 # Uncomment to enable the inverted-colors retry pass when no QR is found.
 # target_compile_definitions(${COMPONENT_LIB} PUBLIC K_QUIRC_INVERTED_RETRY)
 

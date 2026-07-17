@@ -170,6 +170,12 @@ typedef struct {
   int locked_offset; /* threshold offset in effect at return (the lock on a hit,
                         the restored seed on a miss) */
   bool decoded;      /* a code decoded (mirrors the return value) */
+  int blend_score;   /* mid-gray blend score (per-mille) measured inside the
+                        detected QR box on a failed seed pass; -1 when not
+                        computed (decoded at seed, no anchors, invalid box, or
+                        K_QUIRC_BLEND_GATE compiled out) */
+  bool bailed_blend; /* the blend gate ended the sweep after the seed pass
+                        (see k_quirc_set_blend_gate) */
 } k_quirc_adaptive_stats_t;
 
 /**
@@ -231,6 +237,28 @@ void k_quirc_set_ladder(k_quirc_t *q, k_quirc_ladder_t ladder);
  * configuration; a no-op when K_QUIRC_ADAPTIVE_THRESHOLD is compiled out.
  */
 void k_quirc_set_sweep_cap(k_quirc_t *q, int cap);
+
+/**
+ * Runtime blend-gate threshold for k_quirc_decode_adaptive (per-instance,
+ * per-mille, clamped to 0..1000; 0 = disabled).
+ *
+ * A torn animation frame — two displayed codes blended into one exposure —
+ * decodes at NO threshold offset, so a sweep spent on it is pure waste. When
+ * the gate is enabled and the seed pass fails with detection anchors, the
+ * mid-gray blend score measured inside the detected QR's bounding box is
+ * compared against the gate; a score >= the gate ends the sweep immediately
+ * (~1 pass instead of the full ladder). The score is always reported via
+ * k_quirc_adaptive_stats_t when measurable, so a consumer can shadow-measure
+ * its own score distribution with the gate disabled before choosing a
+ * threshold.
+ *
+ * Compiled in (K_QUIRC_BLEND_GATE), a new decoder starts at
+ * K_QUIRC_BLEND_GATE_DEFAULT (160; override the macro at build time to
+ * re-tune). Sensors whose blur population overlaps the blend band should
+ * disable the gate (0). Callable in every build configuration; a no-op when
+ * K_QUIRC_BLEND_GATE is compiled out.
+ */
+void k_quirc_set_blend_gate(k_quirc_t *q, int permille);
 
 /* Debug visualization support */
 #ifdef K_QUIRC_DEBUG

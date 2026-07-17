@@ -155,6 +155,17 @@ typedef struct {
 #define K_QUIRC_FAST_CAP_DEFAULT 4
 #endif
 
+#ifdef K_QUIRC_BLEND_GATE
+/* Default blend-gate threshold (per-mille), the value a fresh decoder starts
+ * with; see k_quirc_set_blend_gate(). Tuned on camera captures of animated
+ * LCD codes (480x480, OV5647): true blends score >= ~160 while frames the
+ * sweep can still rescue stay below it. Override at build time to re-tune;
+ * consumers whose populations differ set per-device policy at runtime. */
+#ifndef K_QUIRC_BLEND_GATE_DEFAULT
+#define K_QUIRC_BLEND_GATE_DEFAULT 160
+#endif
+#endif /* K_QUIRC_BLEND_GATE */
+
 #if QUIRC_MAX_REGIONS < UINT8_MAX
 typedef uint8_t quirc_pixel_t;
 #elif QUIRC_MAX_REGIONS < UINT16_MAX
@@ -237,6 +248,12 @@ struct k_quirc {
                         k_quirc_set_ladder() */
   int sweep_cap;     /* >0: numeric probe budget overriding the effort cap; see
                         k_quirc_set_sweep_cap() */
+#endif
+#ifdef K_QUIRC_BLEND_GATE
+  int blend_gate_permille; /* runtime sweep-bail threshold for the blend
+                              check, 0 = disabled; starts at
+                              K_QUIRC_BLEND_GATE_DEFAULT; see
+                              k_quirc_set_blend_gate() */
 #endif
   int w;
   int h;

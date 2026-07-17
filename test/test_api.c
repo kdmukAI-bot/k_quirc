@@ -123,13 +123,17 @@ int main(void) {
         fprintf(stderr, "adaptive no-qr passes=%d, want <=2\n", stats.passes);
         failures++;
       }
+      /* An anchorless frame must report "not computed" and no bail. */
+      check_int("adaptive no-qr blend score", stats.blend_score, -1);
+      check_int("adaptive no-qr no blend bail", stats.bailed_blend, 0);
       /* NULL stats must be safe. */
       check_int("adaptive null stats safe",
                 k_quirc_decode_adaptive(qa, &result, K_QUIRC_EFFORT_FAST, NULL),
                 0);
     }
-    /* Ladder-profile / sweep-cap setters: callable in every build
-     * configuration (no-ops without K_QUIRC_ADAPTIVE_THRESHOLD), NULL-safe. */
+    /* Ladder-profile / sweep-cap / blend-gate setters: callable in every
+     * build configuration (no-ops when their machinery is compiled out),
+     * NULL-safe. */
     k_quirc_set_ladder(NULL, K_QUIRC_LADDER_REFLECTIVE);
     k_quirc_set_ladder(qa, K_QUIRC_LADDER_REFLECTIVE);
     k_quirc_set_ladder(qa, K_QUIRC_LADDER_EMISSIVE);
@@ -137,6 +141,10 @@ int main(void) {
     k_quirc_set_sweep_cap(qa, -1);
     k_quirc_set_sweep_cap(qa, 6);
     k_quirc_set_sweep_cap(qa, 0);
+    k_quirc_set_blend_gate(NULL, 160);
+    k_quirc_set_blend_gate(qa, -5);
+    k_quirc_set_blend_gate(qa, 2000);
+    k_quirc_set_blend_gate(qa, 0);
     k_quirc_destroy(qa);
   }
 

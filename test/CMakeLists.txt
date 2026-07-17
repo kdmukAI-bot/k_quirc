@@ -45,11 +45,12 @@ target_include_directories(k_quirc_adaptive_test PRIVATE
 )
 
 # Optional algorithms, mirroring the top-level CMakeLists.txt "comment out to
-# disable" flags. Both default ON (production configuration). Turn either off
+# disable" flags. All default ON (production configuration). Turn any off
 # from the command line, e.g. -DK_QUIRC_ADAPTIVE_THRESHOLD=OFF, to build the
 # flag-off configuration the CI no-flag leg exercises.
 option(K_QUIRC_ADAPTIVE_THRESHOLD "Adaptive threshold offset control loop" ON)
 option(K_QUIRC_BILINEAR_THRESHOLD "Four-quadrant Otsu thresholding" ON)
+option(K_QUIRC_BLEND_GATE "Blend-gated adaptive sweep bail" ON)
 
 set(K_QUIRC_TEST_DEFS "")
 if(K_QUIRC_ADAPTIVE_THRESHOLD)
@@ -57,6 +58,9 @@ if(K_QUIRC_ADAPTIVE_THRESHOLD)
 endif()
 if(K_QUIRC_BILINEAR_THRESHOLD)
     list(APPEND K_QUIRC_TEST_DEFS K_QUIRC_BILINEAR_THRESHOLD)
+endif()
+if(K_QUIRC_BLEND_GATE)
+    list(APPEND K_QUIRC_TEST_DEFS K_QUIRC_BLEND_GATE)
 endif()
 
 target_compile_definitions(k_quirc_test PRIVATE

@@ -40,6 +40,9 @@ k_quirc_t *k_quirc_new(void) {
     q->threshold_offset = k_quirc_get_threshold_offset();
     q->ladder_select = K_QUIRC_LADDER_DEFAULT;
 #endif
+#ifdef K_QUIRC_BLEND_GATE
+    q->blend_gate_permille = K_QUIRC_BLEND_GATE_DEFAULT;
+#endif
   }
   return q;
 }
@@ -146,6 +149,82 @@ void k_quirc_end(k_quirc_t *q, bool find_inverted) {
   k_quirc_identify(q, find_inverted);
 }
 
+#if defined(K_QUIRC_BLEND_GATE) && defined(K_QUIRC_ADAPTIVE_THRESHOLD)
+/* Cheap blended-frame detector: per-mille of pixels within +-30 of the Otsu
+ * black/white split, computed over the [x0,x1)x[y0,y1) box of the grayscale
+ * (clamped in-bounds). A clean QR is strongly bimodal and scores low; a torn/
+ * blended (two displayed codes in one exposure) region piles up mid-gray. One
+ * histogram pass -- far cheaper than the identify passes it can save -- so
+ * hopeless frames don't get charged those passes. Returns -1 when the clamped
+ * box is degenerate (< 8 px a side). */
+static int k_quirc_mid_gray_box_permille(const uint8_t *img, int w, int h,
+                                         int x0, int y0, int x1, int y1) {
+  if (x0 < 0)
+    x0 = 0;
+  if (y0 < 0)
+    y0 = 0;
+  if (x1 > w)
+    x1 = w;
+  if (y1 > h)
+    y1 = h;
+  if (x1 - x0 < 8 || y1 - y0 < 8)
+    return -1;
+  long hist[256] = {0};
+  long tot = 0;
+  for (int y = y0; y < y1; y++) {
+    const uint8_t *row = img + (size_t)y * w;
+    for (int x = x0; x < x1; x++) {
+      hist[row[x]]++;
+      tot++;
+    }
+  }
+  double sum = 0;
+  for (int i = 0; i < 256; i++)
+    sum += (double)i * hist[i];
+  /* Otsu's split on the box histogram. */
+  double sumB = 0, vmax = 0;
+  long wB = 0;
+  int T = 0;
+  for (int i = 0; i < 256; i++) {
+    wB += hist[i];
+    if (!wB)
+      continue;
+    long wF = tot - wB;
+    if (!wF)
+      break;
+    sumB += (double)i * hist[i];
+    double mB = sumB / wB, mF = (sum - sumB) / wF, d = mB - mF;
+    double vb = (double)wB * (double)wF * d * d;
+    if (vb >= vmax) {
+      vmax = vb;
+      T = i;
+    }
+  }
+  int lo = T - 30 < 0 ? 0 : T - 30;
+  int hi = T + 30 > 255 ? 255 : T + 30;
+  long mid = 0;
+  for (int v = lo; v <= hi; v++)
+    mid += hist[v];
+  return (int)(1000 * mid / tot);
+}
+#endif /* K_QUIRC_BLEND_GATE && K_QUIRC_ADAPTIVE_THRESHOLD */
+
+void k_quirc_set_blend_gate(k_quirc_t *q, int permille) {
+#ifdef K_QUIRC_BLEND_GATE
+  if (!q)
+    return;
+  if (permille < 0)
+    permille = 0;
+  if (permille > 1000)
+    permille = 1000;
+  q->blend_gate_permille = permille;
+#else
+  /* Feature compiled out: keep the API callable as a no-op. */
+  (void)q;
+  (void)permille;
+#endif
+}
+
 void k_quirc_set_ladder(k_quirc_t *q, k_quirc_ladder_t ladder) {
 #ifdef K_QUIRC_ADAPTIVE_THRESHOLD
   if (!q)
@@ -182,8 +261,10 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
                             k_quirc_effort_t effort,
                             k_quirc_adaptive_stats_t *stats) {
   (void)effort;
-  if (stats)
+  if (stats) {
     memset(stats, 0, sizeof(*stats));
+    stats->blend_score = -1;
+  }
   if (!q || !q->image || !q->pixels || !q->flood_fill_stack || !result)
     return 0;
   k_quirc_identify(q, false);
@@ -203,8 +284,10 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
 int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
                             k_quirc_effort_t effort,
                             k_quirc_adaptive_stats_t *stats) {
-  if (stats)
+  if (stats) {
     memset(stats, 0, sizeof(*stats));
+    stats->blend_score = -1;
+  }
   if (!q || !q->image || !q->pixels || !q->flood_fill_stack || !result)
     return 0;
 
@@ -256,6 +339,14 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
   int decoded = 0;
   int max_caps = 0;      /* most finder patterns seen across probes so far */
   int probed_nonneg = 0; /* a non-negative offset has been probed */
+#ifdef K_QUIRC_BLEND_GATE
+  int blend_score = -1;
+  bool bailed_blend = false;
+  /* Seed-pass anchor bbox, accumulated over failed decode attempts (corners
+   * are reported even on decode failure). */
+  int bx0 = 1 << 30, by0 = 1 << 30, bx1 = -(1 << 30), by1 = -(1 << 30);
+  bool have_corner_box = false;
+#endif
   /* stage 0 = the seed (locked) offset; stages 1..nlad = the ladder. */
   for (int stage = 0; stage <= nlad && passes < cap && !decoded; stage++) {
     const int off = (stage == 0) ? seed : ladder[stage - 1];
@@ -291,7 +382,95 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
         decoded = 1;
         break;
       }
+#ifdef K_QUIRC_BLEND_GATE
+      if (stage == 0) {
+        for (int c = 0; c < 4; c++) {
+          const int cx = result->corners[c].x, cy = result->corners[c].y;
+          if (cx || cy) {
+            have_corner_box = true;
+            if (cx < bx0)
+              bx0 = cx;
+            if (cy < by0)
+              by0 = cy;
+            if (cx > bx1)
+              bx1 = cx;
+            if (cy > by1)
+              by1 = cy;
+          }
+        }
+      }
+#endif
     }
+
+#ifdef K_QUIRC_BLEND_GATE
+    /* Blend check -- seed pass only (a blended frame is blended at every
+     * offset, so one measurement decides). On a failed first pass with
+     * detection anchors, score the mid-gray contamination of the pristine
+     * grayscale INSIDE the detected QR's bounding box -- background-immune by
+     * construction: the box IS the code. The score is always recorded in the
+     * stats (the shadow-tuning data source); it acts on the sweep only when
+     * the runtime gate is enabled, in which case the remaining ladder is
+     * skipped (~1 pass instead of the sweep cap). */
+    if (stage == 0 && !decoded && pristine) {
+      int x0 = bx0, y0 = by0, x1 = bx1, y1 = by1;
+      bool have_box = have_corner_box;
+      if (!have_box && q->num_capstones >= 3) {
+        /* No grid formed: capstone-center bbox inflated ~25% per side
+         * (capstones sit inset from the code edges). */
+        x0 = y0 = 1 << 30;
+        x1 = y1 = -(1 << 30);
+        for (int c = 0; c < q->num_capstones; c++) {
+          const int cx = (int)q->capstones[c].center.x;
+          const int cy = (int)q->capstones[c].center.y;
+          if (cx < x0)
+            x0 = cx;
+          if (cy < y0)
+            y0 = cy;
+          if (cx > x1)
+            x1 = cx;
+          if (cy > y1)
+            y1 = cy;
+        }
+        const int dx = (x1 - x0) / 4, dy = (y1 - y0) / 4;
+        x0 -= dx;
+        x1 += dx;
+        y0 -= dy;
+        y1 += dy;
+        have_box = true;
+      }
+      /* Sanity: a failed pass at a bad offset can report garbage corners
+       * (measured: x=604 on a 480-wide frame). Reject boxes substantially
+       * out of frame, implausibly small, or covering < 1/8 of the frame.
+       * An invalid box means no gate this frame -- never a bail. */
+      if (have_box) {
+        if (x0 < -q->w / 10 || y0 < -q->h / 10 || x1 > q->w + q->w / 10 ||
+            y1 > q->h + q->h / 10) {
+          have_box = false;
+        } else {
+          if (x0 < 0)
+            x0 = 0;
+          if (y0 < 0)
+            y0 = 0;
+          if (x1 > q->w)
+            x1 = q->w;
+          if (y1 > q->h)
+            y1 = q->h;
+          if (x1 - x0 < q->w / 4 || y1 - y0 < q->h / 4 ||
+              (long)(x1 - x0) * (y1 - y0) < (long)q->w * q->h / 8)
+            have_box = false;
+        }
+      }
+      if (have_box) {
+        blend_score =
+            k_quirc_mid_gray_box_permille(pristine, q->w, q->h, x0, y0, x1, y1);
+        if (q->blend_gate_permille > 0 && blend_score >= 0 &&
+            blend_score >= q->blend_gate_permille) {
+          bailed_blend = true;
+          break; /* hopeless (blended) frame: skip the remaining ladder */
+        }
+      }
+    }
+#endif
 
     /* No-QR early-out. Finder patterns are the most threshold-robust part of a
      * QR (large, high-contrast), so once the two most likely offsets -- the
@@ -322,6 +501,10 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
     stats->passes = passes;
     stats->locked_offset = k_quirc_get_threshold_offset_for(q);
     stats->decoded = (bool)decoded;
+#ifdef K_QUIRC_BLEND_GATE
+    stats->blend_score = blend_score;
+    stats->bailed_blend = bailed_blend;
+#endif
   }
   return decoded;
 }
