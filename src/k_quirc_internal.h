@@ -267,6 +267,14 @@ ALWAYS_INLINE void perspective_map(const float *c, float u, float v,
  * Identification module functions (k_quirc_identify.c)
  */
 void k_quirc_identify(struct k_quirc *q, bool find_inverted);
+/* Re-binarize the (unchanged) grayscale frame at the current threshold offset
+ * WITHOUT re-running the finder scan / flood-fill / perspective jiggle. Leaves
+ * q->grids intact so an already-located grid can be re-extracted at a new
+ * offset. Cheap-rescue primitive for the adaptive-sweep grid re-sample. */
+void k_quirc_rethreshold(struct k_quirc *q);
+/* Re-fit grid[index]'s perspective against the current binarization (warm-start
+ * jiggle). Companion to k_quirc_rethreshold for the grid re-sample rescue. */
+void k_quirc_regrid_jiggle(struct k_quirc *q, int index);
 int k_quirc_get_threshold_offset(void);
 void k_quirc_set_threshold_offset(int offset);
 int k_quirc_get_threshold_offset_for(const struct k_quirc *q);

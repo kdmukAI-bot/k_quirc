@@ -227,10 +227,14 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
   uint8_t *pristine = K_MALLOC_IMAGE(n);
 
   int passes = 0;
+  int resample_passes = 0;
   int decoded = 0;
   int win_off = seed;
   bool used_local = false;
   int max_caps = 0; /* most finder patterns seen across probes so far */
+#ifdef K_QUIRC_GRID_RESAMPLE
+  bool have_grid = false; /* a full identify has located a grid to re-sample */
+#endif
   /* stage 0 = the seed (locked) offset; stages 1..nlad = the ladder. */
   for (int stage = 0; stage <= nlad && passes < cap && !decoded; stage++) {
     const int off = (stage == 0) ? seed : ladder[stage - 1];
@@ -247,12 +251,34 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
     }
 
     k_quirc_set_threshold_offset_for(q, off);
-    /* per-frame identify state that k_quirc_begin() normally clears */
-    q->num_regions = QUIRC_PIXEL_REGION;
-    q->num_capstones = 0;
-    q->num_grids = 0;
-    q->flood_fill_overflow = false;
-    k_quirc_identify(q, false);
+#ifdef K_QUIRC_GRID_RESAMPLE
+    if (have_grid) {
+      /* Cheap re-sample: the grid geometry is a function of the grayscale, not
+       * the threshold, and the frame is unchanged — so re-binarize at the new
+       * offset and re-extract+RS-decode the grid already found, skipping the
+       * finder scan / flood-fill / perspective jiggle (~¾ of a full identify).
+       * Zero decode-accuracy risk: pure removal of redundant re-detection. */
+      k_quirc_rethreshold(q);
+#ifdef K_QUIRC_GRID_RESAMPLE_REJIGGLE
+      /* Re-fit each grid's perspective to the new binarization. A grid formed at
+       * a poor threshold has a fitness-jiggled geometry tuned to *that* binary;
+       * reusing it verbatim at another offset costs recovery. Re-jiggling from
+       * the warm coefficients restores it, still skipping finder_scan +
+       * flood_fill (~38% of a full identify). */
+      for (int g = 0; g < q->num_grids; g++)
+        k_quirc_regrid_jiggle(q, g);
+#endif
+      resample_passes++;
+    } else
+#endif
+    {
+      /* per-frame identify state that k_quirc_begin() normally clears */
+      q->num_regions = QUIRC_PIXEL_REGION;
+      q->num_capstones = 0;
+      q->num_grids = 0;
+      q->flood_fill_overflow = false;
+      k_quirc_identify(q, false);
+    }
     passes++;
 
     const int ngrids = k_quirc_count(q);
@@ -264,6 +290,12 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
         break;
       }
     }
+#ifdef K_QUIRC_GRID_RESAMPLE
+    /* Once a full identify has located a grid, reuse its geometry for every
+     * remaining offset in the sweep. */
+    if (ngrids > 0)
+      have_grid = true;
+#endif
 
     /* No-QR early-out. Finder patterns are the most threshold-robust part of a
      * QR (large, high-contrast), so once the two most likely offsets -- the seed
@@ -319,6 +351,7 @@ int k_quirc_decode_adaptive(k_quirc_t *q, k_quirc_result_t *result,
     k_quirc_set_threshold_offset_for(q, seed); /* don't disturb the lock on a miss */
   if (stats) {
     stats->passes = passes;
+    stats->resample_passes = resample_passes;
     stats->locked_offset = k_quirc_get_threshold_offset_for(q);
     stats->win_offset = win_off;
     stats->used_local = used_local;

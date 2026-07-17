@@ -1031,7 +1031,9 @@ void k_quirc_set_threshold_offset_for(struct k_quirc *q, int offset) {
 }
 #endif
 
+#ifndef JIGGLE_PASSES
 #define JIGGLE_PASSES 2
+#endif
 
 static void jiggle_perspective(struct k_quirc *q, int index) {
   struct quirc_grid *qr = &q->grids[index];
@@ -1494,4 +1496,39 @@ void k_quirc_identify(struct k_quirc *q, bool find_inverted) {
 #else
   (void)find_inverted;
 #endif
+}
+
+/* Binarize-only pass: reproduce the pixel-preparation prefix of k_quirc_identify
+ * (pixels_setup + threshold) at the current offset, but skip
+ * the finder scan / grouping / jiggle. q->grids and q->num_grids are left
+ * untouched, so a grid already located by a prior full identify can be
+ * re-extracted against this fresh binarization (the grid geometry is a function
+ * of the grayscale, not the threshold, so it stays valid). */
+void k_quirc_rethreshold(struct k_quirc *q) {
+  if (!q)
+    return;
+
+#ifdef K_QUIRC_ADAPTIVE_THRESHOLD
+  q->processing_inverted = false;
+#endif
+  pixels_setup(q);
+#ifdef K_QUIRC_LOCAL_THRESHOLD
+  if (q->local_win > 0)
+    local_threshold(q, q->local_win);
+  else
+#endif
+    threshold(q, false);
+}
+
+/* Re-fit an already-located grid's perspective against the current binarization,
+ * starting from its existing (warm) coefficients. Used by the adaptive-sweep
+ * grid re-sample to refresh geometry after re-thresholding at a new offset —
+ * the module positions are fixed by the grayscale, but the fitness-guided jiggle
+ * is evaluated on the binary pixels, so re-jiggling recovers the small
+ * geometry drift a fresh identify would have found, without the finder scan /
+ * flood-fill. Skips the timing-bias offset nudge (the sweep forces offsets). */
+void k_quirc_regrid_jiggle(struct k_quirc *q, int index) {
+  if (!q || index < 0 || index >= q->num_grids)
+    return;
+  jiggle_perspective(q, index);
 }

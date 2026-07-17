@@ -164,9 +164,12 @@ typedef enum {
 
 /* Per-call cost/behaviour readout for k_quirc_decode_adaptive (all optional). */
 typedef struct {
-  int passes;       /* identify passes performed (global sweep + local); the
+  int passes;       /* binarization passes performed (global sweep + local); the
                        per-frame cost driver — 1 once locked, up to the ladder
                        cap on acquisition, +1 when the local pass runs */
+  int resample_passes; /* of `passes`, how many were cheap grid re-samples
+                          (re-threshold + re-extract of an already-found grid,
+                          ~¼ the cost of a full identify pass) */
   int locked_offset; /* threshold offset in effect at return (the lock / seed) */
   int win_offset;   /* offset that decoded this frame (locked_offset on a hit) */
   bool used_local;  /* the failure-gated local-threshold pass ran */
