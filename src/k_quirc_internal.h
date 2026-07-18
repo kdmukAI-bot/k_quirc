@@ -157,12 +157,15 @@ typedef struct {
 
 #ifdef K_QUIRC_BLEND_GATE
 /* Default blend-gate threshold (per-mille), the value a fresh decoder starts
- * with; see k_quirc_set_blend_gate(). Tuned on camera captures of animated
- * LCD codes (480x480, OV5647): true blends score >= ~160 while frames the
- * sweep can still rescue stay below it. Override at build time to re-tune;
- * consumers whose populations differ set per-device policy at runtime. */
+ * with; see k_quirc_set_blend_gate(). Frame-audited on camera captures of
+ * animated LCD codes (480x480, OV5647): every frame scoring < 170 was still
+ * sweep-decodable (band_130_170_decodable), while frames at >= 170 were true
+ * animation-torn blends that decode at no offset (over_170_undecodable). Set
+ * at the floor of the undecodable band so no recoverable frame is bailed.
+ * Override at build time to re-tune; consumers whose populations differ set
+ * per-device policy at runtime. */
 #ifndef K_QUIRC_BLEND_GATE_DEFAULT
-#define K_QUIRC_BLEND_GATE_DEFAULT 160
+#define K_QUIRC_BLEND_GATE_DEFAULT 170
 #endif
 #endif /* K_QUIRC_BLEND_GATE */
 

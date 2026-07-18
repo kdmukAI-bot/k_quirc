@@ -253,7 +253,7 @@ void k_quirc_set_sweep_cap(k_quirc_t *q, int cap);
  * threshold.
  *
  * Compiled in (K_QUIRC_BLEND_GATE), a new decoder starts at
- * K_QUIRC_BLEND_GATE_DEFAULT (160; override the macro at build time to
+ * K_QUIRC_BLEND_GATE_DEFAULT (170; override the macro at build time to
  * re-tune). Sensors whose blur population overlaps the blend band should
  * disable the gate (0). Callable in every build configuration; a no-op when
  * K_QUIRC_BLEND_GATE is compiled out.
